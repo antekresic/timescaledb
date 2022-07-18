@@ -31,6 +31,7 @@
 #include "debug_point.h"
 #include "errors.h"
 #include "error_utils.h"
+#include "hypercube.h"
 #include "hypertable.h"
 #include "hypertable_cache.h"
 #include "ts_catalog/continuous_agg.h"
@@ -213,11 +214,66 @@ restore_autovacuum_on_decompress(Oid uncompressed_hypertable_relid, Oid uncompre
 	}
 }
 
+Chunk * 
+find_mergable_chunk(Hypertable *ht, Chunk *current_chunk) 
+{
+    int64 compressed_chunk_interval;
+    int64 max_chunk_interval = 12000000000;
+    int64 current_chunk_interval;
+	const Dimension *time_dim;
+    Chunk *previous_chunk;
+    Point *p;
+    int64 val;
+	time_dim = hyperspace_get_open_dimension(ht->space, 0);
+	if (!time_dim)
+		elog(ERROR, "hypertable has no open partitioning dimension");
+
+    p = ts_point_create(current_chunk->cube->num_slices);
+	for (int i = 0; i < current_chunk->cube->num_slices; i++)
+    {
+        val = current_chunk->cube->slices[i]->fd.range_start;
+        if (current_chunk->cube->slices[i]->fd.dimension_id == time_dim->fd.id)
+        {
+            current_chunk_interval = current_chunk->cube->slices[i]->fd.range_end - current_chunk->cube->slices[i]->fd.range_start; 
+            val--;
+        }
+		p->coordinates[p->num_coords++] = val;
+
+    }
+
+    previous_chunk = ts_hypertable_find_chunk_for_point(ht, p);
+
+    if (!previous_chunk || previous_chunk->fd.compressed_chunk_id == InvalidOid) 
+    {
+        //elog(INFO, "no previous chunk to merge to");
+        return NULL;
+    }   
+
+    
+	for (int i = 0; i < previous_chunk->cube->num_slices; i++)
+    {
+        if (previous_chunk->cube->slices[i]->fd.dimension_id == time_dim->fd.id)
+        {
+            compressed_chunk_interval = previous_chunk->cube->slices[i]->fd.range_end - previous_chunk->cube->slices[i]->fd.range_start; 
+            break;
+        }
+    }
+
+    if (compressed_chunk_interval == 0 || compressed_chunk_interval + current_chunk_interval > max_chunk_interval)
+    {
+        //elog(INFO, "compressed chunk full");
+        return NULL;
+    }
+
+    //elog(INFO, "found a previous chunk to merge to: %s, compressed_chunk_interval %ld", previous_chunk->fd.table_name.data, compressed_chunk_interval);
+    return previous_chunk;
+}
+
 static void
 compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 {
 	CompressChunkCxt cxt;
-	Chunk *compress_ht_chunk;
+	Chunk *compress_ht_chunk, *mergable_chunk;
 	Cache *hcache;
 	ListCell *lc;
 	List *htcols_list = NIL;
@@ -225,6 +281,7 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 	int i = 0, htcols_listlen;
 	RelationSize before_size, after_size;
 	CompressionStats cstat;
+    bool new_compressed_chunk;
 
 	hcache = ts_hypertable_cache_pin();
 	compresschunkcxt_init(&cxt, hcache, hypertable_relid, chunk_relid);
@@ -262,7 +319,16 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 	htcols_list = ts_hypertable_compression_get(cxt.srcht->fd.id);
 	htcols_listlen = list_length(htcols_list);
 	/* create compressed chunk and a new table */
-	compress_ht_chunk = create_compress_chunk(cxt.compress_ht, cxt.srcht_chunk, InvalidOid);
+    mergable_chunk = find_mergable_chunk(cxt.srcht, cxt.srcht_chunk);
+    if (!mergable_chunk) 
+    {
+        compress_ht_chunk = create_compress_chunk(cxt.compress_ht, cxt.srcht_chunk, InvalidOid);
+        new_compressed_chunk = true;
+    }
+    else
+    {
+        compress_ht_chunk = ts_chunk_get_by_id(mergable_chunk->fd.compressed_chunk_id, true);
+    }   
 	/* convert list to array of pointers for compress_chunk */
 	colinfo_array = palloc(sizeof(ColumnCompressionInfo *) * htcols_listlen);
 	foreach (lc, htcols_list)
@@ -275,17 +341,6 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 						   compress_ht_chunk->table_id,
 						   colinfo_array,
 						   htcols_listlen);
-
-	/* Copy chunk constraints (including fkey) to compressed chunk.
-	 * Do this after compressing the chunk to avoid holding strong, unnecessary locks on the
-	 * referenced table during compression.
-	 */
-	ts_chunk_constraints_create(compress_ht_chunk->constraints,
-								compress_ht_chunk->table_id,
-								compress_ht_chunk->fd.id,
-								compress_ht_chunk->hypertable_relid,
-								compress_ht_chunk->fd.hypertable_id);
-	ts_trigger_create_all_on_chunk(compress_ht_chunk);
 
 	/* Drop all FK constraints on the uncompressed chunk. This is needed to allow
 	 * cascading deleted data in FK-referenced tables, while blocking deleting data
@@ -300,7 +355,28 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 										  cstat.rowcnt_pre_compression,
 										  cstat.rowcnt_post_compression);
 
-	ts_chunk_set_compressed_chunk(cxt.srcht_chunk, compress_ht_chunk->fd.id);
+    if (new_compressed_chunk)
+    {
+        /* Copy chunk constraints (including fkey) to compressed chunk.
+         * Do this after compressing the chunk to avoid holding strong, unnecessary locks on the
+         * referenced table during compression.
+         */
+        ts_chunk_constraints_create(compress_ht_chunk->constraints,
+                                    compress_ht_chunk->table_id,
+                                    compress_ht_chunk->fd.id,
+                                    compress_ht_chunk->hypertable_relid,
+                                    compress_ht_chunk->fd.hypertable_id);
+        ts_trigger_create_all_on_chunk(compress_ht_chunk);
+        ts_chunk_set_compressed_chunk(cxt.srcht_chunk, compress_ht_chunk->fd.id);
+    }
+    else
+    {
+        const Dimension *time_dim = hyperspace_get_open_dimension(cxt.srcht->space, 0);
+        if (!time_dim)
+            elog(ERROR, "hypertable has no open partitioning dimension");
+        ts_chunk_merge_across_dimension(mergable_chunk, cxt.srcht_chunk, time_dim->fd.id);
+    }   
+
 	ts_cache_release(hcache);
 }
 

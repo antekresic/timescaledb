@@ -4525,6 +4525,53 @@ add_foreign_table_as_chunk(Oid relid, Hypertable *parent_ht)
 	chunk_add_inheritance(chunk, parent_ht);
 }
 
+void
+ts_chunk_merge_across_dimension(Chunk *chunk, const Chunk *merge_chunk, int32 dimension_id)
+{
+    const DimensionSlice *slice, *merge_slice;
+    int num_ccs, i;
+    Assert(chunk->hypertable_relid == merge_chunk->hypertable_relid);
+
+    slice = ts_hypercube_get_slice_by_dimension_id(chunk->cube, dimension_id);
+    merge_slice = ts_hypercube_get_slice_by_dimension_id(merge_chunk->cube, dimension_id);
+
+    Assert(slice);
+    Assert(merge_slice);
+    //elog(INFO, "first end %ld second start %ld", slice->fd.range_end, merge_slice->fd.range_start);
+    Assert(slice->fd.range_end == merge_slice->fd.range_start);
+    num_ccs = ts_chunk_constraint_scan_by_dimension_slice_id(slice->fd.id, NULL, CurrentMemoryContext);
+
+    Assert(num_ccs > 0);
+
+    DimensionSlice *new_slice = ts_dimension_slice_create(dimension_id, slice->fd.range_start, merge_slice->fd.range_end );
+    if (num_ccs == 1)
+    {
+        ts_dimension_slice_delete_by_id(slice->fd.id, false);
+    }
+    ts_dimension_slice_insert(new_slice);
+    ts_chunk_constraint_update_slice_id(chunk->fd.id, slice->fd.id, new_slice->fd.id);
+    ChunkConstraints *ccs = ts_chunk_constraints_alloc(1, CurrentMemoryContext);
+    num_ccs = ts_chunk_constraint_scan_by_dimension_slice_id(new_slice->fd.id, ccs, CurrentMemoryContext);
+
+    Assert(num_ccs > 0);
+
+    for (i = 0; i < ccs->capacity; i++)
+    {
+        ChunkConstraint cc = ccs->constraints[i];
+        if (cc.fd.chunk_id == chunk->fd.id)
+        {
+            ts_process_utility_set_expect_chunk_modification(true);
+            ts_chunk_constraint_recreate(&cc, chunk->table_id);
+            ts_process_utility_set_expect_chunk_modification(false);
+            break;
+        }
+    }
+
+    Assert(ts_chunk_add_status(chunk, CHUNK_STATUS_COMPRESSED_UNORDERED));
+
+    ts_chunk_drop(merge_chunk, DROP_RESTRICT, 1);
+}
+
 /* Internal API used by OSM extension. OSM table is a foreign table that is
  * attached as a chunk of the hypertable. A chunk needs dimension constraints. We
  * add dummy constraints for the OSM chunk and then attach it to the hypertable.

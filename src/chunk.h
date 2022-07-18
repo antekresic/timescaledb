@@ -227,6 +227,7 @@ extern ScanIterator ts_chunk_scan_iterator_create(MemoryContext result_mcxt);
 extern void ts_chunk_scan_iterator_set_chunk_id(ScanIterator *it, int32 chunk_id);
 extern bool ts_chunk_lock_if_exists(Oid chunk_oid, LOCKMODE chunk_lockmode);
 extern int ts_chunk_oid_cmp(const void *p1, const void *p2);
+extern TSDLLEXPORT void ts_chunk_merge_across_dimension(Chunk *chunk, const Chunk *empty_chunk, int32 dimension_id);
 
 #define chunk_get_by_name(schema_name, table_name, fail_if_not_found)                              \
 	ts_chunk_get_by_name_with_memory_context(schema_name,                                          \

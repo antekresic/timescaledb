@@ -502,6 +502,50 @@ static SegmentInfo *segment_info_new(Form_pg_attribute column_attr);
 static void segment_info_update(SegmentInfo *segment_info, Datum val, bool is_null);
 static bool segment_info_datum_is_in_group(SegmentInfo *segment_info, Datum datum, bool is_null);
 
+static int32
+get_max_sequence_number(Relation compressed_table, int16 seq_num_column_offset) {
+    int32 max_seq_num = 0;
+    int32 curr_seq_num = 0;
+    HeapTuple compressed_tuple;
+	TupleDesc in_desc = RelationGetDescr(compressed_table);
+    Datum *compressed_datums = palloc(sizeof(*compressed_datums) * in_desc->natts);
+    bool *compressed_is_nulls = palloc(sizeof(*compressed_is_nulls) * in_desc->natts);
+    TableScanDesc heapScan = table_beginscan(compressed_table, GetLatestSnapshot(), 0, (ScanKey) NULL);
+
+    MemoryContext per_compressed_row_ctx =
+        AllocSetContextCreate(CurrentMemoryContext,
+                              "compressed row get max sequence number",
+                              ALLOCSET_DEFAULT_SIZES);
+
+    for (compressed_tuple = heap_getnext(heapScan, ForwardScanDirection);
+         compressed_tuple != NULL;
+         compressed_tuple = heap_getnext(heapScan, ForwardScanDirection))
+    {
+        MemoryContext old_ctx;
+
+        Assert(HeapTupleIsValid(compressed_tuple));
+
+        old_ctx = MemoryContextSwitchTo(per_compressed_row_ctx);
+
+        heap_deform_tuple(compressed_tuple, in_desc, compressed_datums, compressed_is_nulls);
+        if (!compressed_is_nulls[seq_num_column_offset])
+        {
+            curr_seq_num = DatumGetInt32(compressed_datums[seq_num_column_offset]);
+            if (max_seq_num < curr_seq_num) 
+            {
+                max_seq_num = curr_seq_num;
+            }
+            
+        }
+        MemoryContextSwitchTo(old_ctx);
+        MemoryContextReset(per_compressed_row_ctx);
+    }
+
+    heap_endscan(heapScan);
+
+    return max_seq_num + SEQUENCE_NUM_GAP;
+}
+
 /* num_compression_infos is the number of columns we will write to in the compressed table */
 static void
 row_compressor_init(RowCompressor *row_compressor, TupleDesc uncompressed_tuple_desc,
@@ -550,7 +594,7 @@ row_compressor_init(RowCompressor *row_compressor, TupleDesc uncompressed_tuple_
 		.rows_compressed_into_current_value = 0,
 		.rowcnt_pre_compression = 0,
 		.num_compressed_rows = 0,
-		.sequence_num = SEQUENCE_NUM_GAP,
+		.sequence_num = get_max_sequence_number(compressed_table, AttrNumberGetAttrOffset(sequence_num_column_num)),
 	};
 
 	memset(row_compressor->compressed_is_null, 1, sizeof(bool) * num_columns_in_compressed_table);

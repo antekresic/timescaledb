@@ -9,6 +9,7 @@
 #include <postgres.h>
 #include <fmgr.h>
 
+extern Chunk *find_mergable_chunk(Hypertable *ht, Chunk *current_chunk);
 extern Datum tsl_create_compressed_chunk(PG_FUNCTION_ARGS);
 extern Datum tsl_compress_chunk(PG_FUNCTION_ARGS);
 extern Datum tsl_decompress_chunk(PG_FUNCTION_ARGS);
