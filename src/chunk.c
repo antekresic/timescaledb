@@ -4567,8 +4567,6 @@ ts_chunk_merge_across_dimension(Chunk *chunk, const Chunk *merge_chunk, int32 di
         }
     }
 
-    Assert(ts_chunk_add_status(chunk, CHUNK_STATUS_COMPRESSED_UNORDERED));
-
     ts_chunk_drop(merge_chunk, DROP_RESTRICT, 1);
 }
 

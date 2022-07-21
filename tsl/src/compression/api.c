@@ -269,6 +269,29 @@ find_mergable_chunk(Hypertable *ht, Chunk *current_chunk)
     return previous_chunk;
 }
 
+// Check if the chunk is unordered after merging due to
+// order by clause not starting with time dimension column in ascending order.
+bool
+check_is_chunk_unordered_by_merge(const Dimension *time_dim, const FormData_hypertable_compression **column_compression_info, int num_compression_infos)
+{
+    for (int i=0; i <num_compression_infos; i++)
+    {
+        if (column_compression_info[i]->orderby_column_index == 1)
+        {
+            if (!column_compression_info[i]->orderby_asc)
+            {
+                return true;
+            }
+            if (get_attnum(time_dim->main_table_relid, NameStr(column_compression_info[i]->attname)) != time_dim->column_attno)
+            {
+                return true;
+            } 
+        }
+    }
+
+    return false;
+}
+
 static void
 compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 {
@@ -375,6 +398,12 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
         if (!time_dim)
             elog(ERROR, "hypertable has no open partitioning dimension");
         ts_chunk_merge_across_dimension(mergable_chunk, cxt.srcht_chunk, time_dim->fd.id);
+
+        if (check_is_chunk_unordered_by_merge(time_dim, colinfo_array, htcols_listlen))
+        {
+            ts_chunk_set_unordered(mergable_chunk);
+            tsl_recompress_chunk_wrapper(mergable_chunk); 
+        }
     }   
 
 	ts_cache_release(hcache);

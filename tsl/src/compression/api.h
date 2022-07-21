@@ -10,6 +10,7 @@
 #include <fmgr.h>
 
 extern Chunk *find_mergable_chunk(Hypertable *ht, Chunk *current_chunk);
+extern bool check_is_chunk_unordered_by_merge(const Dimension *time_dim, const FormData_hypertable_compression **column_compression_info, int num_compression_infos);
 extern Datum tsl_create_compressed_chunk(PG_FUNCTION_ARGS);
 extern Datum tsl_compress_chunk(PG_FUNCTION_ARGS);
 extern Datum tsl_decompress_chunk(PG_FUNCTION_ARGS);
