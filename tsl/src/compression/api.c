@@ -292,9 +292,10 @@ check_is_chunk_unordered_by_merge(const Dimension *time_dim, const FormData_hype
     return false;
 }
 
-static void
+static Oid
 compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 {
+    Oid result_chunk_id = chunk_relid;
 	CompressChunkCxt cxt;
 	Chunk *compress_ht_chunk, *mergable_chunk;
 	Cache *hcache;
@@ -351,6 +352,7 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
     else
     {
         compress_ht_chunk = ts_chunk_get_by_id(mergable_chunk->fd.compressed_chunk_id, true);
+        result_chunk_id = mergable_chunk->table_id;
     }   
 	/* convert list to array of pointers for compress_chunk */
 	colinfo_array = palloc(sizeof(ColumnCompressionInfo *) * htcols_listlen);
@@ -407,6 +409,7 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
     }   
 
 	ts_cache_release(hcache);
+    return result_chunk_id;
 }
 
 static bool
@@ -521,7 +524,7 @@ decompress_chunk_impl(Oid uncompressed_hypertable_relid, Oid uncompressed_chunk_
  * already compressed, unless it is running in idempotent mode.
  */
 
-void
+Oid
 tsl_compress_chunk_wrapper(Chunk *chunk, bool if_not_compressed)
 {
 	if (chunk->fd.compressed_chunk_id != INVALID_CHUNK_ID)
@@ -529,10 +532,10 @@ tsl_compress_chunk_wrapper(Chunk *chunk, bool if_not_compressed)
 		ereport((if_not_compressed ? NOTICE : ERROR),
 				(errcode(ERRCODE_DUPLICATE_OBJECT),
 				 errmsg("chunk \"%s\" is already compressed", get_rel_name(chunk->table_id))));
-		return;
+		return InvalidOid;
 	}
 
-	compress_chunk_impl(chunk->hypertable_relid, chunk->table_id);
+	return compress_chunk_impl(chunk->hypertable_relid, chunk->table_id);
 }
 
 /*
@@ -701,7 +704,7 @@ tsl_compress_chunk(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		tsl_compress_chunk_wrapper(chunk, if_not_compressed);
+		uncompressed_chunk_id = tsl_compress_chunk_wrapper(chunk, if_not_compressed);
 	}
 
 	PG_RETURN_OID(uncompressed_chunk_id);
