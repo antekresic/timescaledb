@@ -97,6 +97,94 @@ compression_chunk_size_catalog_insert(int32 src_chunk_id, const RelationSize *sr
 	table_close(rel, RowExclusiveLock);
 }
 
+static int
+compression_chunk_size_catalog_update_merged(int32 src_chunk_id, const RelationSize *src_size,
+									  int32 compress_chunk_id, const RelationSize *compress_size,
+									  int64 rowcnt_pre_compression, int64 rowcnt_post_compression)
+{
+    elog(INFO, "searching for one %d", src_chunk_id);
+	ScanIterator iterator =
+		ts_scan_iterator_create(COMPRESSION_CHUNK_SIZE, RowExclusiveLock, CurrentMemoryContext);
+	bool updated = false;
+    RelationSize src_size_total;
+
+	iterator.ctx.index =
+		catalog_get_index(ts_catalog_get(), COMPRESSION_CHUNK_SIZE, COMPRESSION_CHUNK_SIZE_PKEY);
+	ts_scan_iterator_scan_key_init(&iterator,
+								   Anum_compression_chunk_size_pkey_chunk_id,
+								   BTEqualStrategyNumber,
+								   F_INT4EQ,
+								   Int32GetDatum(src_chunk_id));
+	ts_scan_iterator_scan_key_init(&iterator,
+								   Anum_compression_chunk_size_pkey_compressed_chunk_id,
+								   BTEqualStrategyNumber,
+								   F_INT4EQ,
+								   Int32GetDatum(compress_chunk_id));
+	ts_scanner_foreach(&iterator)
+	{
+        elog(INFO, "found one %d %d", src_chunk_id, compress_chunk_id);
+        Datum values[Natts_compression_chunk_size];
+		bool repl[Natts_compression_chunk_size] = { false };
+        bool nulls[Natts_compression_chunk_size] = { false };
+		bool should_free;
+		TupleInfo *ti = ts_scan_iterator_tuple_info(&iterator);
+		HeapTuple tuple = ts_scanner_fetch_heap_tuple(ti, false, &should_free);
+		HeapTuple new_tuple;
+		heap_deform_tuple(tuple, ts_scanner_get_tupledesc(ti), values, nulls);
+
+        // Increment existing sizes with sizes from uncompressed chunk.
+        src_size_total.heap_size = src_size->heap_size + 
+            DatumGetInt64(values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_heap_size)]);
+        src_size_total.index_size = src_size->index_size +
+            DatumGetInt64(values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_index_size)]);
+        src_size_total.toast_size = src_size->toast_size + 
+            DatumGetInt64(values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_toast_size)]);
+        int64 pre_compression = rowcnt_pre_compression + 
+            DatumGetInt64(values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_pre_compression)]); 
+        int64 post_compression = rowcnt_post_compression + 
+            DatumGetInt64(values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_post_compression)]); 
+
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_heap_size)] =
+            Int64GetDatum(src_size_total.heap_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_heap_size)] = true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_toast_size)] =
+            Int64GetDatum(src_size_total.toast_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_toast_size)] =true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_index_size)] =
+            Int64GetDatum(src_size_total.index_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_uncompressed_index_size)] = true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_heap_size)] =
+            Int64GetDatum(compress_size->heap_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_heap_size)] = true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_toast_size)] =
+            Int64GetDatum(compress_size->toast_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_toast_size)] = true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_index_size)] =
+            Int64GetDatum(compress_size->index_size);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_compressed_index_size)] =true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_pre_compression)] =
+            Int64GetDatum(pre_compression);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_pre_compression)] =true;
+        values[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_post_compression)] =
+            Int64GetDatum(post_compression);
+        repl[AttrNumberGetAttrOffset(Anum_compression_chunk_size_numrows_post_compression)] =true;
+
+		new_tuple = heap_modify_tuple(tuple, ts_scanner_get_tupledesc(ti), values, nulls, repl);
+		ts_catalog_update(ti->scanrel, new_tuple);
+        heap_freetuple(new_tuple);
+
+		if (should_free)
+			heap_freetuple(tuple);
+
+        updated = true;
+        break;
+	}
+
+    ts_scan_iterator_end(&iterator);
+    ts_scan_iterator_close(&iterator);
+    return updated;
+}
+
 static void
 get_hypertable_or_cagg_name(Hypertable *ht, Name objname)
 {
@@ -245,7 +333,6 @@ find_mergable_chunk(Hypertable *ht, Chunk *current_chunk)
 
     if (!previous_chunk || previous_chunk->fd.compressed_chunk_id == InvalidOid) 
     {
-        //elog(INFO, "no previous chunk to merge to");
         return NULL;
     }   
 
@@ -261,11 +348,9 @@ find_mergable_chunk(Hypertable *ht, Chunk *current_chunk)
 
     if (compressed_chunk_interval == 0 || compressed_chunk_interval + current_chunk_interval > max_chunk_interval)
     {
-        //elog(INFO, "compressed chunk full");
         return NULL;
     }
 
-    //elog(INFO, "found a previous chunk to merge to: %s, compressed_chunk_interval %ld", previous_chunk->fd.table_name.data, compressed_chunk_interval);
     return previous_chunk;
 }
 
@@ -373,15 +458,16 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
 	 */
 	ts_chunk_drop_fks(cxt.srcht_chunk);
 	after_size = ts_relation_size_impl(compress_ht_chunk->table_id);
-	compression_chunk_size_catalog_insert(cxt.srcht_chunk->fd.id,
-										  &before_size,
-										  compress_ht_chunk->fd.id,
-										  &after_size,
-										  cstat.rowcnt_pre_compression,
-										  cstat.rowcnt_post_compression);
 
     if (new_compressed_chunk)
     {
+        compression_chunk_size_catalog_insert(cxt.srcht_chunk->fd.id,
+                                              &before_size,
+                                              compress_ht_chunk->fd.id,
+                                              &after_size,
+                                              cstat.rowcnt_pre_compression,
+                                              cstat.rowcnt_post_compression);
+
         /* Copy chunk constraints (including fkey) to compressed chunk.
          * Do this after compressing the chunk to avoid holding strong, unnecessary locks on the
          * referenced table during compression.
@@ -396,6 +482,13 @@ compress_chunk_impl(Oid hypertable_relid, Oid chunk_relid)
     }
     else
     {
+        compression_chunk_size_catalog_update_merged(mergable_chunk->fd.id,
+                                              &before_size,
+                                              compress_ht_chunk->fd.id,
+                                              &after_size,
+                                              cstat.rowcnt_pre_compression,
+                                              cstat.rowcnt_post_compression);
+
         const Dimension *time_dim = hyperspace_get_open_dimension(cxt.srcht->space, 0);
         if (!time_dim)
             elog(ERROR, "hypertable has no open partitioning dimension");
