@@ -290,9 +290,9 @@ ts_compress_hypertable_parse_chunk_time_interval(WithClauseResult *parsed_option
 {
 	if (parsed_options[CompressChunkTimeInterval].is_default == false)
 	{
-		Datum textarg = parsed_options[CompressOrderBy].parsed;
+		Datum textarg = parsed_options[CompressChunkTimeInterval].parsed;
         return DatumGetIntervalP(textarg);
 	}
-
-    return NULL;
+    else
+        return NULL;
 }

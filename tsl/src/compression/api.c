@@ -306,7 +306,7 @@ Chunk *
 find_mergable_chunk(Hypertable *ht, Chunk *current_chunk) 
 {
     int64 compressed_chunk_interval;
-    int64 max_chunk_interval = 12000000000;
+    int64 max_chunk_interval;
     int64 current_chunk_interval;
 	const Dimension *time_dim;
     Chunk *previous_chunk;
@@ -315,6 +315,13 @@ find_mergable_chunk(Hypertable *ht, Chunk *current_chunk)
 	time_dim = hyperspace_get_open_dimension(ht->space, 0);
 	if (!time_dim)
 		elog(ERROR, "hypertable has no open partitioning dimension");
+
+    if (time_dim->fd.compress_interval_length == 0)
+    {
+        return NULL;
+    }
+
+    max_chunk_interval = time_dim->fd.compress_interval_length;
 
     p = ts_point_create(current_chunk->cube->num_slices);
 	for (int i = 0; i < current_chunk->cube->num_slices; i++)
@@ -625,7 +632,7 @@ tsl_compress_chunk_wrapper(Chunk *chunk, bool if_not_compressed)
 		ereport((if_not_compressed ? NOTICE : ERROR),
 				(errcode(ERRCODE_DUPLICATE_OBJECT),
 				 errmsg("chunk \"%s\" is already compressed", get_rel_name(chunk->table_id))));
-		return InvalidOid;
+		return chunk->table_id;
 	}
 
 	return compress_chunk_impl(chunk->hypertable_relid, chunk->table_id);

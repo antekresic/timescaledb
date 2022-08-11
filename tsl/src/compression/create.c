@@ -1065,6 +1065,7 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	List *segmentby_cols;
 	List *orderby_cols;
 	List *constraint_list = NIL;
+    Interval *compress_interval;
 
 	if (TS_HYPERTABLE_IS_INTERNAL_COMPRESSION_TABLE(ht))
 	{
@@ -1091,6 +1092,7 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	segmentby_cols = ts_compress_hypertable_parse_segment_by(with_clause_options, ht);
 	orderby_cols = ts_compress_hypertable_parse_order_by(with_clause_options, ht);
 	orderby_cols = add_time_to_order_by_if_not_included(orderby_cols, segmentby_cols, ht);
+    compress_interval = ts_compress_hypertable_parse_chunk_time_interval(with_clause_options, ht);
 
 	if (TS_HYPERTABLE_HAS_COMPRESSION_ENABLED(ht))
 		check_modify_compression_options(ht, with_clause_options, orderby_cols);
@@ -1129,6 +1131,7 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	/*add the constraints to the new compressed hypertable */
 	ht = ts_hypertable_get_by_id(ht->fd.id); /*reload updated info*/
 	ts_hypertable_clone_constraints_to_compressed(ht, constraint_list);
+    ts_hypertable_set_compress_interval(ht, compress_interval);
 
 	/* do not release any locks, will get released by xact end */
 	return true;
