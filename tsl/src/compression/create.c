@@ -1041,6 +1041,13 @@ drop_column_from_compression_table(Hypertable *compress_ht, char *name)
 	ts_alter_table_with_event_trigger(compress_relid, NULL, list_make1(cmd), true);
 }
 
+static inline int64
+interval_to_usec(Interval *interval)
+{
+	return (interval->month * DAYS_PER_MONTH * USECS_PER_DAY) + (interval->day * USECS_PER_DAY) +
+		   interval->time;
+}
+
 /*
  * enables compression for the passed in table by
  * creating a compression hypertable with special properties
@@ -1065,6 +1072,8 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	List *segmentby_cols;
 	List *orderby_cols;
 	List *constraint_list = NIL;
+	Interval *compress_interval;
+	const Dimension *time_dim;
 
 	if (TS_HYPERTABLE_IS_INTERNAL_COMPRESSION_TABLE(ht))
 	{
@@ -1091,6 +1100,7 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	segmentby_cols = ts_compress_hypertable_parse_segment_by(with_clause_options, ht);
 	orderby_cols = ts_compress_hypertable_parse_order_by(with_clause_options, ht);
 	orderby_cols = add_time_to_order_by_if_not_included(orderby_cols, segmentby_cols, ht);
+	compress_interval = ts_compress_hypertable_parse_chunk_time_interval(with_clause_options, ht);
 
 	if (TS_HYPERTABLE_HAS_COMPRESSION_ENABLED(ht))
 		check_modify_compression_options(ht, with_clause_options, orderby_cols);
@@ -1129,6 +1139,17 @@ tsl_process_compress_table(AlterTableCmd *cmd, Hypertable *ht,
 	/*add the constraints to the new compressed hypertable */
 	ht = ts_hypertable_get_by_id(ht->fd.id); /*reload updated info*/
 	ts_hypertable_clone_constraints_to_compressed(ht, constraint_list);
+
+	if (compress_interval != NULL)
+	{
+		time_dim = hyperspace_get_open_dimension(ht->space, 0);
+		int64 compress_interval_usec = interval_to_usec(compress_interval);
+		if (compress_interval_usec % time_dim->fd.interval_length > 0)
+			elog(WARNING,
+				 "compress chunk interval is not a multiple of chunk interval, you should use a "
+				 "factor of chunk interval to merge as much as possible");
+		ts_hypertable_set_compress_interval(ht, compress_interval_usec);
+	}
 
 	/* do not release any locks, will get released by xact end */
 	return true;

@@ -20,6 +20,8 @@
 #include <funcapi.h>
 #include <libpq/pqformat.h>
 #include <miscadmin.h>
+#include <nodes/makefuncs.h>
+#include <nodes/pg_list.h>
 #include <storage/lmgr.h>
 #include <storage/predicate.h>
 #include <utils/builtins.h>
@@ -136,6 +138,8 @@ typedef struct RowCompressor
 
 	/* the number of uncompressed rows compressed into the current compressed row */
 	uint32 rows_compressed_into_current_value;
+	/* segment starting sequence number */
+	int32 starting_sequence_num;
 	/* a unique monotonically increasing (according to order by) id for each compressed row */
 	int32 sequence_num;
 
@@ -313,6 +317,8 @@ compress_chunk(Oid in_table, Oid out_table, const ColumnCompressionInfo **column
 						out_desc->natts,
 						true /*need_bistate*/);
 
+    bool already_indexed = row_compressor.starting_sequence_num == SEQUENCE_NUM_GAP;
+
 	row_compressor_append_sorted_rows(&row_compressor, sorted_rel, in_desc);
 
 	row_compressor_finish(&row_compressor);
@@ -321,15 +327,18 @@ compress_chunk(Oid in_table, Oid out_table, const ColumnCompressionInfo **column
 
 	truncate_relation(in_table);
 
-	/* Recreate all indexes on out rel, we already have an exclusive lock on it,
-	 * so the strong locks taken by reindex_relation shouldn't matter. */
-#if PG14_LT
-	int options = 0;
-#else
-	ReindexParams params = { 0 };
-	ReindexParams *options = &params;
-#endif
-	reindex_relation(out_table, 0, options);
+    if (!already_indexed)
+    {
+        /* Recreate all indexes on out rel, we already have an exclusive lock on it,
+         * so the strong locks taken by reindex_relation shouldn't matter. */
+    #if PG14_LT
+        int options = 0;
+    #else
+        ReindexParams params = { 0 };
+        ReindexParams *options = &params;
+    #endif
+        reindex_relation(out_table, 0, options);
+    }
 
 	table_close(out_rel, NoLock);
 	table_close(in_rel, NoLock);
@@ -389,6 +398,31 @@ static void compress_chunk_populate_sort_info_for_column(Oid table,
 														 const ColumnCompressionInfo *column,
 														 AttrNumber *att_nums, Oid *sort_operator,
 														 Oid *collation, bool *nulls_first);
+static void
+preserve_uncompressed_chunk_stats(Oid chunk_relid)
+{
+	AlterTableCmd at_cmd = {
+		.type = T_AlterTableCmd,
+		.subtype = AT_SetRelOptions,
+		.def = (Node *) list_make1(
+			makeDefElem("autovacuum_enabled", (Node *) makeString("false"), -1)),
+	};
+	VacuumRelation vr = {
+		.type = T_VacuumRelation,
+		.relation = NULL,
+		.oid = chunk_relid,
+		.va_cols = NIL,
+	};
+	VacuumStmt vs = {
+		.type = T_VacuumStmt,
+		.rels = list_make1(&vr),
+		.is_vacuumcmd = false,
+		.options = NIL,
+	};
+
+	ExecVacuum(NULL, &vs, true);
+	ts_alter_table_with_event_trigger(chunk_relid, NULL, list_make1(&at_cmd), false);
+}
 
 static Tuplesortstate *
 compress_chunk_sort_relation(Relation in_rel, int n_keys, const ColumnCompressionInfo **keys)
@@ -439,6 +473,8 @@ compress_chunk_sort_relation(Relation in_rel, int n_keys, const ColumnCompressio
 	}
 
 	heap_endscan(heapScan);
+
+    preserve_uncompressed_chunk_stats(in_rel->rd_id);
 
 	ExecDropSingleTupleTableSlot(heap_tuple_slot);
 
@@ -502,6 +538,50 @@ static SegmentInfo *segment_info_new(Form_pg_attribute column_attr);
 static void segment_info_update(SegmentInfo *segment_info, Datum val, bool is_null);
 static bool segment_info_datum_is_in_group(SegmentInfo *segment_info, Datum datum, bool is_null);
 
+static int32
+get_max_sequence_number(Relation compressed_table, int16 seq_num_column_num)
+{
+	int32 max_seq_num = 0;
+	int32 curr_seq_num = 0;
+	HeapTuple compressed_tuple;
+	TupleDesc in_desc = RelationGetDescr(compressed_table);
+	Datum seq_num;
+	bool is_null = true;
+	TableScanDesc heapScan =
+		table_beginscan(compressed_table, GetLatestSnapshot(), 0, (ScanKey) NULL);
+
+	MemoryContext per_compressed_row_ctx =
+		AllocSetContextCreate(CurrentMemoryContext,
+							  "compressed row get max sequence number",
+							  ALLOCSET_DEFAULT_SIZES);
+
+	for (compressed_tuple = heap_getnext(heapScan, ForwardScanDirection); compressed_tuple != NULL;
+		 compressed_tuple = heap_getnext(heapScan, ForwardScanDirection))
+	{
+		MemoryContext old_ctx;
+
+		Assert(HeapTupleIsValid(compressed_tuple));
+
+		old_ctx = MemoryContextSwitchTo(per_compressed_row_ctx);
+
+		seq_num = heap_getattr(compressed_tuple, seq_num_column_num, in_desc, &is_null);
+		if (!is_null)
+		{
+			curr_seq_num = DatumGetInt32(seq_num);
+			if (max_seq_num < curr_seq_num)
+			{
+				max_seq_num = curr_seq_num;
+			}
+		}
+		MemoryContextSwitchTo(old_ctx);
+		MemoryContextReset(per_compressed_row_ctx);
+	}
+
+	heap_endscan(heapScan);
+
+	return max_seq_num + SEQUENCE_NUM_GAP;
+}
+
 /* num_compression_infos is the number of columns we will write to in the compressed table */
 static void
 row_compressor_init(RowCompressor *row_compressor, TupleDesc uncompressed_tuple_desc,
@@ -550,8 +630,10 @@ row_compressor_init(RowCompressor *row_compressor, TupleDesc uncompressed_tuple_
 		.rows_compressed_into_current_value = 0,
 		.rowcnt_pre_compression = 0,
 		.num_compressed_rows = 0,
-		.sequence_num = SEQUENCE_NUM_GAP,
+		.starting_sequence_num = get_max_sequence_number(compressed_table, sequence_num_column_num),
 	};
+
+	row_compressor->sequence_num = row_compressor->starting_sequence_num;
 
 	memset(row_compressor->compressed_is_null, 1, sizeof(bool) * num_columns_in_compressed_table);
 
@@ -904,7 +986,7 @@ row_compressor_flush(RowCompressor *row_compressor, CommandId mycid, bool change
 	 * many segmentby columns.
 	 */
 	if (changed_groups)
-		row_compressor->sequence_num = SEQUENCE_NUM_GAP;
+		row_compressor->sequence_num = row_compressor->starting_sequence_num;
 
 	MemoryContextReset(row_compressor->per_row_ctx);
 }
