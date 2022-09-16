@@ -975,6 +975,19 @@ ts_dimension_slice_insert_multi(DimensionSlice **slices, Size num_slices)
 	return n;
 }
 
+void
+ts_dimension_slice_insert(DimensionSlice *slice)
+{
+	Catalog *catalog = ts_catalog_get();
+	Relation rel;
+
+	rel = table_open(catalog_get_table_id(catalog, DIMENSION_SLICE), RowExclusiveLock);
+
+	dimension_slice_insert_relation(rel, slice);
+
+	table_close(rel, RowExclusiveLock);
+}
+
 static ScanTupleResult
 dimension_slice_nth_tuple_found(TupleInfo *ti, void *data)
 {
