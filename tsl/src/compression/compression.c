@@ -142,8 +142,6 @@ typedef struct RowCompressor
 
 	/* the number of uncompressed rows compressed into the current compressed row */
 	uint32 rows_compressed_into_current_value;
-	/* segment starting sequence number */
-	int32 starting_sequence_num;
 	/* a unique monotonically increasing (according to order by) id for each compressed row */
 	int32 sequence_num;
 
@@ -679,7 +677,7 @@ get_sequence_number_for_current_group(Relation table_rel, Oid index_oid,
 		}
 	}
 
-	Relation index_rel = index_open(index_oid, NoLock);
+	Relation index_rel = index_open(index_oid, AccessShareLock);
 	RelationInitIndexAccessInfo(index_rel);
 
 	IndexScanDesc index_scan =
@@ -699,7 +697,7 @@ get_sequence_number_for_current_group(Relation table_rel, Oid index_oid,
 	}
 
 	index_endscan(index_scan);
-	index_close(index_rel, NoLock);
+	index_close(index_rel, AccessShareLock);
 
 	MemoryContextSwitchTo(old_ctx);
 	MemoryContextReset(index_scan_ctx);
@@ -958,7 +956,7 @@ static void
 row_compressor_update_group(RowCompressor *row_compressor, TupleTableSlot *row)
 {
 	int col;
-	bool is_segment_by;
+	bool is_segment_by = false;
 
 	Assert(row_compressor->rows_compressed_into_current_value == 0);
 	Assert(row_compressor->n_input_columns <= row->tts_nvalid);
