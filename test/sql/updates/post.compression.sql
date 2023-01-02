@@ -2,6 +2,7 @@
 -- Please see the included NOTICE for copyright information and
 -- LICENSE-APACHE for a copy of the license.
 
+ANALYZE compress;
 SELECT * FROM compress ORDER BY time DESC, small_cardinality;
 
 INSERT INTO compress
@@ -17,6 +18,7 @@ WHERE
   hypertable.table_name = 'compress'
   AND chunk.compressed_chunk_id IS NULL;
 
+ANALYZE compress;
 SELECT * FROM compress ORDER BY time DESC, small_cardinality;
 
 \x on

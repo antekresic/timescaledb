@@ -50,7 +50,10 @@ step "SChunkStat" {  SELECT status from _timescaledb_catalog.chunk
 
 session "S"
 step "S1" { SELECT count(*) from ts_device_table; }
-step "SC1" { SELECT (count_chunktable(ch)).* FROM show_chunks('ts_device_table') AS ch LIMIT 1; }
+step "SC1" { 
+    ANALYZE ts_device_table; 
+    SELECT (count_chunktable(ch)).* FROM show_chunks('ts_device_table') AS ch LIMIT 1; 
+}
 step "SH" { SELECT total_chunks, number_compressed_chunks from hypertable_compression_stats('ts_device_table'); }
 step "SA" { SELECT * FROM ts_device_table; }
 step "SU" { SELECT * FROM ts_device_table WHERE value IN (98,99); }
