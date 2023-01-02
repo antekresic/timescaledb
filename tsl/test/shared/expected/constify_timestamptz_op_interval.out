@@ -136,9 +136,10 @@ WHERE time < '2000-01-01'::timestamptz - '6h'::interval
 QUERY PLAN
  Custom Scan (DecompressChunk) on _hyper_X_X_chunk
    Filter: ("time" < ('Sat Jan 01 00:00:00 2000 PST'::timestamp with time zone - '@ 6 hours'::interval))
-   ->  Seq Scan on compress_hyper_X_X_chunk
-         Filter: ((device_id = 1) AND (_ts_meta_min_1 < ('Sat Jan 01 00:00:00 2000 PST'::timestamp with time zone - '@ 6 hours'::interval)))
-(4 rows)
+   ->  Index Scan using compress_hyper_X_X_chunk__compressed_hypertable_6_device_id__t on compress_hyper_X_X_chunk
+         Index Cond: (device_id = 1)
+         Filter: (_ts_meta_min_1 < ('Sat Jan 01 00:00:00 2000 PST'::timestamp with time zone - '@ 6 hours'::interval))
+(5 rows)
 
 -- month/year intervals are not constified
 :PREFIX

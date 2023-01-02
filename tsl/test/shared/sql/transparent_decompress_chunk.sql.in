@@ -56,7 +56,9 @@ ORDER BY time, device_id;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id = 1 ORDER BY time, device_id LIMIT 10;
 
 -- test IS NULL / IS NOT NULL
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id IS NOT NULL ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id IS NULL ORDER BY time, device_id LIMIT 10;
 
@@ -68,7 +70,9 @@ ORDER BY time, device_id;
 
 --test var op var
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id = v0 ORDER BY time, device_id LIMIT 10;
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id < v1 ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 
 -- test expressions
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id = 1 + 4 / 2 ORDER BY time, device_id LIMIT 10;
@@ -84,14 +88,18 @@ ORDER BY time, device_id;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time = '2000-01-01 1:00:00+0' ORDER BY time, device_id LIMIT 10;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time < '2000-01-01 1:00:00+0' ORDER BY time, device_id LIMIT 10;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time <= '2000-01-01 1:00:00+0' ORDER BY time, device_id LIMIT 10;
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time >= '2000-01-01 1:00:00+0' ORDER BY time, device_id LIMIT 10;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time > '2000-01-01 1:00:00+0' ORDER BY time, device_id LIMIT 10;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE '2000-01-01 1:00:00+0' < time ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 
 --pushdowns between order by and segment by columns
 :PREFIX SELECT * FROM :TEST_TABLE WHERE v0 < 1 ORDER BY time, device_id LIMIT 10;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE v0 < device_id ORDER BY time, device_id LIMIT 10;
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE device_id < v0 ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE v1 = device_id ORDER BY time, device_id LIMIT 10;
 
 --pushdown between two order by column (not pushed down)
@@ -101,10 +109,14 @@ ORDER BY time, device_id;
 :PREFIX_VERBOSE SELECT * FROM :TEST_TABLE WHERE time > '2000-01-01 1:00:00+0' AND device_id = 1 ORDER BY time, device_id LIMIT 10;
 
 --pushdown of quals on order by and segment by cols or together (not pushed down)
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time > '2000-01-01 1:00:00+0' OR device_id = 1 ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 
 --functions not yet optimized
+SET parallel_leader_participation TO false;
 :PREFIX SELECT * FROM :TEST_TABLE WHERE time < now() ORDER BY time, device_id LIMIT 10;
+RESET parallel_leader_participation;
 
 -- test sort optimization interaction
 :PREFIX SELECT time FROM :TEST_TABLE ORDER BY time DESC LIMIT 10;
@@ -187,6 +199,7 @@ CREATE OR REPLACE VIEW compressed_view AS SELECT time, device_id, v1, v2 FROM :T
 DROP VIEW compressed_view;
 
 -- test INNER JOIN
+SET max_parallel_workers_per_gather = 0;
 :PREFIX
 SELECT *
 FROM :TEST_TABLE m1
@@ -206,6 +219,7 @@ FROM :TEST_TABLE m1
     ORDER BY m1.time,
         m1.device_id
     LIMIT 10;
+RESET max_parallel_workers_per_gather;
 
 :PREFIX
 SELECT *
@@ -232,6 +246,8 @@ FROM metrics m1
     LIMIT 100;
 
 -- test OUTER JOIN
+SET parallel_leader_participation TO false;
+SET max_parallel_workers_per_gather = 0;
 :PREFIX
 SELECT *
 FROM :TEST_TABLE m1
@@ -240,6 +256,7 @@ FROM :TEST_TABLE m1
 ORDER BY m1.time,
     m1.device_id
 LIMIT 10;
+RESET max_parallel_workers_per_gather;
 
 :PREFIX
 SELECT *
@@ -253,7 +270,6 @@ ORDER BY m1.time,
     m2.device_id
 LIMIT 100;
 
-SET parallel_leader_participation TO false;
 -- test implicit self-join
 :PREFIX
 SELECT *

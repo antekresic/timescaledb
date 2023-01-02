@@ -6,6 +6,9 @@ accidentally triggering the load of a previous DB version.**
 
 ## Unreleased
 
+**Features**
+* #5137 Insert into index during chunk compression
+
 **Bugfixes**
 * #4926 Fix corruption when inserting into compressed chunks
 

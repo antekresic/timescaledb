@@ -617,15 +617,15 @@ and ht.table_name like 'test_collation' ORDER BY ch1.id LIMIT 2;
 
 --segment bys are pushed down correctly
 EXPLAIN (costs off) SELECT * FROM test_collation WHERE device_id < 'a';
-                        QUERY PLAN                        
-----------------------------------------------------------
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
  Append
    ->  Custom Scan (DecompressChunk) on _hyper_9_19_chunk
-         ->  Seq Scan on compress_hyper_10_29_chunk
-               Filter: (device_id < 'a'::text)
+         ->  Index Scan using compress_hyper_10_29_chunk__compressed_hypertable_10_device_id_ on compress_hyper_10_29_chunk
+               Index Cond: (device_id < 'a'::text)
    ->  Custom Scan (DecompressChunk) on _hyper_9_20_chunk
-         ->  Seq Scan on compress_hyper_10_30_chunk
-               Filter: (device_id < 'a'::text)
+         ->  Index Scan using compress_hyper_10_30_chunk__compressed_hypertable_10_device_id_ on compress_hyper_10_30_chunk
+               Index Cond: (device_id < 'a'::text)
    ->  Seq Scan on _hyper_9_21_chunk
          Filter: (device_id < 'a'::text)
    ->  Seq Scan on _hyper_9_22_chunk

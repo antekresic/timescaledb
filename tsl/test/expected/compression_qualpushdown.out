@@ -196,36 +196,37 @@ SELECT compress_chunk(i) from show_chunks('pushdown_relabel') i;
 (1 row)
 
 EXPLAIN (costs off) SELECT * FROM pushdown_relabel WHERE dev_vc = 'varchar';
-                     QUERY PLAN                     
-----------------------------------------------------
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
  Custom Scan (DecompressChunk) on _hyper_5_6_chunk
-   ->  Seq Scan on compress_hyper_6_7_chunk
-         Filter: ((dev_vc)::text = 'varchar'::text)
+   ->  Index Scan using compress_hyper_6_7_chunk__compressed_hypertable_6_dev_vc_dev_c_ on compress_hyper_6_7_chunk
+         Index Cond: ((dev_vc)::text = 'varchar'::text)
 (3 rows)
 
 EXPLAIN (costs off) SELECT * FROM pushdown_relabel WHERE dev_c = 'char';
-                    QUERY PLAN                     
----------------------------------------------------
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
  Custom Scan (DecompressChunk) on _hyper_5_6_chunk
-   ->  Seq Scan on compress_hyper_6_7_chunk
-         Filter: (dev_c = 'char'::bpchar)
+   ->  Index Scan using compress_hyper_6_7_chunk__compressed_hypertable_6_dev_vc_dev_c_ on compress_hyper_6_7_chunk
+         Index Cond: (dev_c = 'char'::bpchar)
 (3 rows)
 
 EXPLAIN (costs off) SELECT * FROM pushdown_relabel WHERE dev_vc = 'varchar' AND dev_c = 'char';
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
  Custom Scan (DecompressChunk) on _hyper_5_6_chunk
-   ->  Seq Scan on compress_hyper_6_7_chunk
-         Filter: (((dev_vc)::text = 'varchar'::text) AND (dev_c = 'char'::bpchar))
+   ->  Index Scan using compress_hyper_6_7_chunk__compressed_hypertable_6_dev_vc_dev_c_ on compress_hyper_6_7_chunk
+         Index Cond: (((dev_vc)::text = 'varchar'::text) AND (dev_c = 'char'::bpchar))
 (3 rows)
 
 EXPLAIN (costs off) SELECT * FROM pushdown_relabel WHERE dev_vc = 'varchar'::char(10) AND dev_c = 'char'::varchar;
-                                           QUERY PLAN                                            
--------------------------------------------------------------------------------------------------
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
  Custom Scan (DecompressChunk) on _hyper_5_6_chunk
-   ->  Seq Scan on compress_hyper_6_7_chunk
-         Filter: (((dev_vc)::bpchar = 'varchar   '::character(10)) AND (dev_c = 'char'::bpchar))
-(3 rows)
+   ->  Index Scan using compress_hyper_6_7_chunk__compressed_hypertable_6_dev_vc_dev_c_ on compress_hyper_6_7_chunk
+         Index Cond: (dev_c = 'char'::bpchar)
+         Filter: ((dev_vc)::bpchar = 'varchar   '::character(10))
+(4 rows)
 
 -- test again with index scans
 SET enable_seqscan TO false;
