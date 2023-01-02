@@ -233,3 +233,43 @@ SET enable_seqscan TO OFF;
 SET enable_bitmapscan TO ON;
 
 SELECT count(*) FROM test8 WHERE series_id = 1;
+
+DROP TABLE test8;
+
+CREATE TABLE test9(time TIMESTAMPTZ NOT NULL, value DOUBLE PRECISION NOT NULL, series_id BIGINT NOT NULL);
+
+SELECT create_hypertable('test9', 'time', chunk_time_interval => INTERVAL '1 h');
+
+ALTER TABLE test9 set (timescaledb.compress,
+    timescaledb.compress_segmentby = 'series_id',
+    timescaledb.compress_orderby = 'time',
+    timescaledb.compress_chunk_time_interval = '1 day');
+
+INSERT INTO test9 (time, series_id, value) SELECT t, s, s%6 FROM generate_series(NOW(), NOW()+INTERVAL'4h', INTERVAL '30s') t CROSS JOIN generate_series(0, 100, 1) s;
+SELECT compress_chunk(c, true) FROM show_chunks('test9') c;
+
+-- Verify index is being is correctly built and giving the same results as sequential scan.
+SET enable_indexscan TO OFF;
+SET enable_seqscan TO ON;
+SET enable_bitmapscan TO OFF;
+
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test9 WHERE series_id IN (1, 50, 99);
+CREATE TABLE seq_data AS SELECT * FROM test9 WHERE series_id IN (1, 50, 99);
+
+SET enable_indexscan TO ON;
+SET enable_seqscan TO OFF;
+
+EXPLAIN (COSTS OFF) SELECT count(*) FROM test9 WHERE series_id IN (1, 50, 99);
+CREATE TABLE index_data AS SELECT * FROM test9 WHERE series_id IN (1, 50, 99);
+
+-- Make sure there are no distinct rows in both tables.
+SELECT count(*)
+FROM seq_data
+FULL OUTER JOIN index_data ON (seq_data.time = index_data.time AND seq_data.series_id = index_data.series_id)
+WHERE (seq_data.*) IS DISTINCT FROM (index_data.*);
+
+RESET enable_indexscan;
+RESET enable_seqscan;
+RESET enable_bitmapscan;
+
+DROP TABLE test9;

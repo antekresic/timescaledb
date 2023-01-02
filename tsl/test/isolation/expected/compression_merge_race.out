@@ -103,3 +103,83 @@ count|expected
    24|      24
 (1 row)
 
+
+starting permutation: s1_compress_single_chunk s1_compress_all_chunks_single_transaction s3_select_on_compressed_chunk s3_wait_for_finish s1_compress_finish
+step s1_compress_single_chunk: 
+    select compress_chunk(c, true) from show_chunks('sensor_data') c limit 1;
+
+compress_chunk                        
+--------------------------------------
+_timescaledb_internal._hyper_X_X_chunk
+(1 row)
+
+step s1_compress_all_chunks_single_transaction: 
+    BEGIN;
+    select compress_chunk(c, true) from show_chunks('sensor_data') c;
+
+s1: NOTICE:  chunk "_hyper_X_X_chunk" is already compressed
+compress_chunk                         
+---------------------------------------
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk 
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+_timescaledb_internal._hyper_X_X_chunk
+(48 rows)
+
+step s3_select_on_compressed_chunk: 
+    SELECT count(*) FROM _timescaledb_internal.compress_hyper_X_X_chunk where sensor_id = 40 AND temperature IS NOT NULL;
+
+count
+-----
+    1
+(1 row)
+
+step s3_wait_for_finish: 
+
+step s1_compress_finish: 
+    COMMIT;
+

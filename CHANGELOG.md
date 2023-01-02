@@ -6,6 +6,9 @@ accidentally triggering the load of a previous DB version.**
 
 ## Unreleased
 
+**Features**
+* #5137 Insert into index during chunk compression
+
 **Bugfixes**
 * #4926 Fix corruption when inserting into compressed chunks
 * #5114 Fix issue with deleting data node and dropping database

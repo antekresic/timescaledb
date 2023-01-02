@@ -603,12 +603,12 @@ SELECT 1 FROM test GROUP BY enum_col;
 (2 rows)
 
 EXPLAIN SELECT DISTINCT 1 FROM test;
-                                              QUERY PLAN                                              
-------------------------------------------------------------------------------------------------------
- Unique  (cost=0.51..21.02 rows=1 width=4)
-   ->  Result  (cost=0.51..21.02 rows=2000 width=4)
-         ->  Custom Scan (DecompressChunk) on _hyper_29_19_chunk  (cost=0.51..1.02 rows=2000 width=0)
-               ->  Seq Scan on compress_hyper_30_20_chunk  (cost=0.00..1.02 rows=2 width=4)
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Unique  (cost=0.02..9219.20 rows=1 width=4)
+   ->  Result  (cost=0.02..9219.20 rows=920000 width=4)
+         ->  Custom Scan (DecompressChunk) on _hyper_29_19_chunk  (cost=0.02..19.20 rows=920000 width=0)
+               ->  Seq Scan on compress_hyper_30_20_chunk  (cost=0.00..19.20 rows=920 width=4)
 (4 rows)
 
 --github issue 4398

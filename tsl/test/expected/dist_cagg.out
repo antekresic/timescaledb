@@ -58,7 +58,7 @@ SELECT * FROM conditions_dist_1m ORDER BY bucket;
 SELECT alter_data_node(:'DATA_NODE_1');
                   alter_data_node                  
 ---------------------------------------------------
- (db_dist_cagg_1,localhost,55432,db_dist_cagg_1,t)
+ (db_dist_cagg_1,localhost,55432,db_dist_cagg_1,f)
 (1 row)
 
 SELECT alter_data_node(:'DATA_NODE_1', port => 55433, available => false);
