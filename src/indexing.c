@@ -184,7 +184,7 @@ create_default_indexes(const Hypertable *ht, const Dimension *time_dim, const Di
 	IndexElem telem = {
 		.type = T_IndexElem,
 		.name = dimname ? (char *) dimname : NULL,
-		.ordering = SORTBY_DESC,
+		.ordering = SORTBY_ASC,
 		.expr = (Node *) get_open_dim_expr(time_dim),
 	};
 
