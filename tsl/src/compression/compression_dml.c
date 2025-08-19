@@ -401,7 +401,7 @@ decompress_batches_for_update_delete(ModifyHypertableState *ht_state, Chunk *chu
 	stats = decompress_batches_scan(comp_chunk_rel,
 									chunk_rel,
 									matching_index_rel,
-									GetTransactionSnapshot(),
+									GetActiveSnapshot(),
 									index_scankeys,
 									num_index_scankeys,
 									scankeys,
@@ -1069,7 +1069,7 @@ decompress_chunk_walker(PlanState *ps, struct decompress_chunk_context *ctx)
 					ScanState *ss = ((ScanState *) ps);
 					if (ss && ss->ss_currentScanDesc)
 					{
-						ss->ss_currentScanDesc->rs_snapshot = GetTransactionSnapshot();
+						ss->ss_currentScanDesc->rs_snapshot = GetActiveSnapshot();
 						table_rescan(ss->ss_currentScanDesc, NULL);
 					}
 				}

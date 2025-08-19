@@ -308,6 +308,8 @@ compress_chunk(Oid in_table, Oid out_table, int insert_options)
 	Ensure(in_rel->rd_rel->relkind == RELKIND_RELATION, "compress_chunk called on non-relation");
 	Ensure(out_rel->rd_rel->relkind == RELKIND_RELATION, "compress_chunk called on non-relation");
 
+	PushActiveSnapshot(GetTransactionSnapshot());
+
 	/* Before calling row compressor relation should be segmented and sorted as configured
 	 * by compress_segmentby and compress_orderby.
 	 * Cost of sorting can be mitigated if we find an existing BTREE index defined for
@@ -472,7 +474,7 @@ compress_chunk(Oid in_table, Oid out_table, int insert_options)
 			 get_rel_name(matched_index_rel->rd_id));
 
 		index_scan =
-			index_beginscan_compat(in_rel, matched_index_rel, GetTransactionSnapshot(), NULL, 0, 0);
+			index_beginscan_compat(in_rel, matched_index_rel, GetActiveSnapshot(), NULL, 0, 0);
 		slot = table_slot_create(in_rel, NULL);
 		index_rescan(index_scan, NULL, 0, NULL, 0);
 		report_reltuples = calculate_reltuples_to_report(in_rel->rd_rel->reltuples);
@@ -576,6 +578,9 @@ compress_chunk(Oid in_table, Oid out_table, int insert_options)
 
 	table_close(out_rel, NoLock);
 	table_close(in_rel, NoLock);
+
+	PopActiveSnapshot();
+
 	cstat.rowcnt_pre_compression = row_compressor.rowcnt_pre_compression;
 	cstat.rowcnt_post_compression = row_compressor.num_compressed_rows;
 
@@ -644,7 +649,7 @@ compress_chunk_sort_relation(CompressionSettings *settings, Relation in_rel)
 	TableScanDesc scan;
 	TupleTableSlot *slot;
 	tuplesortstate = compression_create_tuplesort_state(settings, in_rel);
-	scan = table_beginscan(in_rel, GetLatestSnapshot(), 0, NULL);
+	scan = table_beginscan(in_rel, GetActiveSnapshot(), 0, NULL);
 	slot = table_slot_create(in_rel, NULL);
 
 	while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
@@ -1626,11 +1631,12 @@ decompress_chunk(Oid in_table, Oid out_table)
 	Relation in_rel = table_open(in_table, ExclusiveLock);
 	int64 nrows_processed = 0;
 
+	PushActiveSnapshot(GetTransactionSnapshot());
 	BulkWriter writer = bulk_writer_build(out_rel, 0);
 	RowDecompressor decompressor =
 		build_decompressor(RelationGetDescr(in_rel), RelationGetDescr(out_rel));
 	TupleTableSlot *slot = table_slot_create(in_rel, NULL);
-	TableScanDesc scan = table_beginscan(in_rel, GetLatestSnapshot(), 0, (ScanKey) NULL);
+	TableScanDesc scan = table_beginscan(in_rel, GetActiveSnapshot(), 0, (ScanKey) NULL);
 	int64 report_reltuples = calculate_reltuples_to_report(in_rel->rd_rel->reltuples);
 
 	while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
@@ -1666,6 +1672,8 @@ decompress_chunk(Oid in_table, Oid out_table)
 
 	table_close(out_rel, NoLock);
 	table_close(in_rel, NoLock);
+
+	PopActiveSnapshot();
 }
 
 static void
